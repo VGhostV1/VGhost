@@ -1,0 +1,145 @@
+name: VGhost Android Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Find and Extract App ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP="$(find . -maxdepth 4 -type f -iname '*.zip' \
+            ! -path './android_project/*' \
+            -print -quit)"
+
+          if [ -z "$ZIP" ]; then
+            echo "ZIP faylı tapılmadı."
+            exit 1
+          fi
+
+          echo "Tapılan ZIP: $ZIP"
+
+          rm -rf android_project
+          mkdir -p android_project
+
+          unzip -q "$ZIP" -d android_project
+
+          PROJECT_ROOT="$(find android_project -type f \
+            \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
+            -print -quit | xargs -r dirname)"
+
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "Android project ZIP-in içində tapılmadı."
+            exit 1
+          fi
+
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+          cache-disabled: true
+
+      - name: Decode signing keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -e
+
+          test -n "$KEYSTORE_BASE64" || {
+            echo "KEYSTORE_BASE64 yoxdur."
+            exit 1
+          }
+
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > "$RUNNER_TEMP/vghost-release.jks"
+
+          test -s "$RUNNER_TEMP/vghost-release.jks"
+
+      - name: Configure Release Signing
+        shell: bash
+        run: |
+          set -e
+
+          APP_GRADLE="$PROJECT_ROOT/app/build.gradle.kts"
+
+          test -f "$APP_GRADLE" || {
+            echo "app/build.gradle.kts tapılmadı."
+            exit 1
+          }
+
+          cat >> "$APP_GRADLE" <<'KOTLIN'
+
+          /* VGhost GitHub Actions signing */
+          android {
+              signingConfigs {
+                  create("vghostRelease") {
+                      storeFile = file(System.getenv("VGHOST_KEYSTORE_FILE"))
+                      storePassword = System.getenv("VGHOST_KEYSTORE_PASSWORD")
+                      keyAlias = System.getenv("VGHOST_KEY_ALIAS")
+                      keyPassword = System.getenv("VGHOST_KEY_PASSWORD")
+                  }
+              }
+
+              buildTypes {
+                  getByName("release") {
+                      signingConfig = signingConfigs.getByName("vghostRelease")
+                  }
+              }
+          }
+          KOTLIN
+
+      - name: Build Signed APK + AAB
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        env:
+          VGHOST_KEYSTORE_FILE: ${{ runner.temp }}/vghost-release.jks
+          VGHOST_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          VGHOST_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          VGHOST_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+
+          test -n "$VGHOST_KEYSTORE_PASSWORD"
+          test -n "$VGHOST_KEY_ALIAS"
+          test -n "$VGHOST_KEY_PASSWORD"
+
+          gradle bundleRelease assembleRelease \
+            --stacktrace \
+            --no-daemon
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: VGhost-PlayConsole-AAB
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VGhost-Release-APK
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
