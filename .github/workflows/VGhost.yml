@@ -273,7 +273,7 @@ jobs:
 
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
 
-      # 8. VERIFY PROJECT
+      # 8. VERIFY PROJECT + AGP
       - name: Verify Project Configuration
         shell: bash
         run: |
@@ -284,15 +284,21 @@ jobs:
           echo "=========================================="
 
           APP_GRADLE="$PROJECT_ROOT/app/build.gradle.kts"
+          ROOT_GRADLE="$PROJECT_ROOT/build.gradle.kts"
 
           if [ ! -f "$APP_GRADLE" ]; then
             echo "app/build.gradle.kts tapılmadı."
             exit 1
           fi
 
+          if [ ! -f "$ROOT_GRADLE" ]; then
+            echo "root build.gradle.kts tapılmadı."
+            exit 1
+          fi
+
           echo ""
           echo "=== ROOT build.gradle.kts ==="
-          cat "$PROJECT_ROOT/build.gradle.kts"
+          cat "$ROOT_GRADLE"
 
           echo ""
           echo "=== APP build.gradle.kts ==="
@@ -324,11 +330,32 @@ jobs:
           echo "compileSdk = 37 OK"
           echo "targetSdk = 37 OK"
 
-      # 9. GRADLE 9.3.1
+          echo ""
+          echo "=========================================="
+          echo "AGP VERSION CHECK"
+          echo "=========================================="
+
+          if ! grep -q \
+            'com.android.application.*version "9.3.0"' \
+            "$ROOT_GRADLE"; then
+
+            echo ""
+            echo "ERROR: Android Gradle Plugin 9.3.0 tapılmadı."
+            echo ""
+            echo "Root build.gradle.kts daxilində belə olmalıdır:"
+            echo 'id("com.android.application") version "9.3.0" apply false'
+            echo ""
+            exit 1
+          fi
+
+          echo ""
+          echo "AGP 9.3.0 OK"
+
+      # 9. GRADLE 9.5.0
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'
+          gradle-version: '9.5.0'
           cache-disabled: true
 
       # 10. CHECK GRADLE
