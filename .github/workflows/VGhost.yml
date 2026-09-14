@@ -30,7 +30,7 @@ jobs:
 
 
       # ============================================================
-      # 3. ANDROID SDK
+      # 3. ANDROID SDK BASE
       # ============================================================
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -39,7 +39,7 @@ jobs:
 
 
       # ============================================================
-      # 4. PREPARE SDK MANAGER
+      # 4. PREPARE SDK
       # ============================================================
       - name: Prepare Android SDK
         shell: bash
@@ -56,21 +56,24 @@ jobs:
           echo "sdkmanager: $SDKMANAGER"
           "$SDKMANAGER" --version
 
-          echo "=== Accepting licenses ==="
+          echo ""
+          echo "Accepting Android SDK licenses..."
 
           yes | "$SDKMANAGER" --licenses >/dev/null || true
 
-          echo "=== Updating SDK metadata ==="
+          echo ""
+          echo "Updating SDK metadata..."
 
           "$SDKMANAGER" --update || true
 
-          echo "=== Installed packages ==="
+          echo ""
+          echo "Installed SDK packages:"
 
           "$SDKMANAGER" --list_installed || true
 
 
       # ============================================================
-      # 5. FIND AND INSTALL ANDROID API 37
+      # 5. INSTALL ANDROID API 37
       # ============================================================
       - name: Install Android API 37
         shell: bash
@@ -86,7 +89,7 @@ jobs:
           "$SDKMANAGER" --list > /tmp/sdk-list.txt
 
           echo ""
-          echo "=== Available Android 37 packages ==="
+          echo "Available Android 37 packages:"
 
           grep -E \
             'platforms;android-37|build-tools;37' \
@@ -95,7 +98,7 @@ jobs:
 
           # --------------------------------------------------------
           # Find latest stable Android 37 platform
-          # Example:
+          # Examples:
           # platforms;android-37.0
           # platforms;android-37.1
           # platforms;android-37.2
@@ -117,19 +120,19 @@ jobs:
             echo ""
             echo "Android 37 platform paketi tapılmadı."
             echo ""
-            echo "Mövcud Android 37 paketləri:"
+            echo "Available Android 37 packages:"
             grep -E 'platforms;android-37' /tmp/sdk-list.txt || true
             exit 1
           fi
 
 
           echo ""
-          echo "Seçilən Android Platform:"
+          echo "Selected Android Platform:"
           echo "$PLATFORM_VERSION"
 
 
           # --------------------------------------------------------
-          # Install Android platform
+          # Install Android Platform
           # --------------------------------------------------------
 
           "$SDKMANAGER" --install \
@@ -157,14 +160,14 @@ jobs:
             echo ""
             echo "Build Tools 37.x tapılmadı."
             echo ""
-            echo "Mövcud Build Tools:"
+            echo "Available Build Tools:"
             grep -E 'build-tools;' /tmp/sdk-list.txt | head -50 || true
             exit 1
           fi
 
 
           echo ""
-          echo "Seçilən Build Tools:"
+          echo "Selected Build Tools:"
           echo "$BUILD_TOOLS_VERSION"
 
 
@@ -194,24 +197,24 @@ jobs:
 
           echo ""
           echo "Installed Platforms:"
-          ls -la "$ANDROID_HOME/platforms" || true
+          ls -la "$ANDROID_HOME/platforms"
 
           echo ""
           echo "Installed Build Tools:"
-          ls -la "$ANDROID_HOME/build-tools" || true
+          ls -la "$ANDROID_HOME/build-tools"
 
-
-          # Find installed Android 37 platform
+          echo ""
+          echo "Checking Android API 37..."
 
           PLATFORM_DIR="$(
             find "$ANDROID_HOME/platforms" \
               -maxdepth 1 \
               -type d \
-              -name 'android-37.*' |
+              -name 'android-37.*' \
+              ! -name '*beta*' |
             sort -V |
             tail -1
-          )
-
+          )"
 
           if [ -z "$PLATFORM_DIR" ]; then
             echo ""
@@ -219,13 +222,12 @@ jobs:
             exit 1
           fi
 
-
           echo ""
           echo "Android API 37:"
           echo "$PLATFORM_DIR"
 
-
-          # Find installed Build Tools 37
+          echo ""
+          echo "Checking Build Tools 37..."
 
           BUILD_TOOLS_DIR="$(
             find "$ANDROID_HOME/build-tools" \
@@ -234,15 +236,13 @@ jobs:
               -name '37.*' |
             sort -V |
             tail -1
-          )
-
+          )"
 
           if [ -z "$BUILD_TOOLS_DIR" ]; then
             echo ""
             echo "Build Tools 37 quraşdırılmayıb."
             exit 1
           fi
-
 
           echo ""
           echo "Build Tools:"
@@ -266,7 +266,6 @@ jobs:
           echo "SEARCHING FOR APP ZIP"
           echo "=========================================="
 
-
           ZIP="$(
             find . \
               -type f \
@@ -275,8 +274,7 @@ jobs:
               ! -path './.git/*' \
               -print |
             head -1
-          )
-
+          )"
 
           if [ -z "$ZIP" ]; then
             echo ""
@@ -284,26 +282,21 @@ jobs:
             exit 1
           fi
 
-
           echo ""
-          echo "Tapılan App ZIP:"
+          echo "App ZIP:"
           echo "$ZIP"
-
 
           rm -rf android_project
 
           mkdir -p android_project
 
-
           echo ""
-          echo "Extracting..."
+          echo "Extracting App ZIP..."
 
           unzip -q "$ZIP" -d android_project
 
-
           echo ""
           echo "Searching Android project..."
-
 
           PROJECT_ROOT="$(
             find android_project \
@@ -316,8 +309,7 @@ jobs:
               -print |
             head -1 |
             xargs -r dirname
-          )
-
+          )"
 
           if [ -z "$PROJECT_ROOT" ]; then
             echo ""
@@ -328,11 +320,9 @@ jobs:
             exit 1
           fi
 
-
           echo ""
           echo "PROJECT_ROOT:"
           echo "$PROJECT_ROOT"
-
 
           echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
 
@@ -349,24 +339,20 @@ jobs:
           echo "PROJECT CONFIGURATION"
           echo "=========================================="
 
-
           if [ ! -f "$PROJECT_ROOT/app/build.gradle.kts" ]; then
             echo "app/build.gradle.kts tapılmadı."
             exit 1
           fi
-
 
           echo ""
           echo "=== ROOT build.gradle.kts ==="
 
           cat "$PROJECT_ROOT/build.gradle.kts"
 
-
           echo ""
           echo "=== APP build.gradle.kts ==="
 
           cat "$PROJECT_ROOT/app/build.gradle.kts"
-
 
           echo ""
           echo "=== SETTINGS ==="
@@ -377,22 +363,18 @@ jobs:
             cat "$PROJECT_ROOT/settings.gradle"
           fi
 
-
           echo ""
           echo "=========================================="
           echo "SDK CONFIGURATION CHECK"
           echo "=========================================="
 
-
           grep -q \
             'compileSdk = 37' \
             "$PROJECT_ROOT/app/build.gradle.kts"
 
-
           grep -q \
             'targetSdk = 37' \
             "$PROJECT_ROOT/app/build.gradle.kts"
-
 
           echo ""
           echo "compileSdk = 37 OK"
@@ -440,17 +422,14 @@ jobs:
             exit 1
           fi
 
-
           echo "$KEYSTORE_BASE64" |
             base64 --decode >
             "$RUNNER_TEMP/vghost-release.jks"
-
 
           if [ ! -s "$RUNNER_TEMP/vghost-release.jks" ]; then
             echo "Keystore boşdur və ya decode alınmadı."
             exit 1
           fi
-
 
           echo "Keystore hazırdır."
 
@@ -465,12 +444,10 @@ jobs:
 
           APP_GRADLE="$PROJECT_ROOT/app/build.gradle.kts"
 
-
           if [ ! -f "$APP_GRADLE" ]; then
             echo "app/build.gradle.kts tapılmadı."
             exit 1
           fi
-
 
           cat >> "$APP_GRADLE" <<'KOTLIN'
 
@@ -510,7 +487,6 @@ jobs:
 
           KOTLIN
 
-
           echo "Release signing configuration hazırdır."
 
 
@@ -533,23 +509,19 @@ jobs:
             exit 1
           fi
 
-
           if [ -z "$VGHOST_KEY_ALIAS" ]; then
             echo "KEY_ALIAS secret yoxdur."
             exit 1
           fi
-
 
           if [ -z "$VGHOST_KEY_PASSWORD" ]; then
             echo "KEY_PASSWORD secret yoxdur."
             exit 1
           fi
 
-
           echo "=========================================="
           echo "BUILDING RELEASE"
           echo "=========================================="
-
 
           gradle \
             bundleRelease \
@@ -571,10 +543,8 @@ jobs:
           echo "BUILD OUTPUT VERIFICATION"
           echo "=========================================="
 
-
           APK_DIR="app/build/outputs/apk/release"
           AAB_DIR="app/build/outputs/bundle/release"
-
 
           echo ""
           echo "=== APK ==="
@@ -586,7 +556,6 @@ jobs:
             -print \
             -exec ls -lh {} \;
 
-
           echo ""
           echo "=== AAB ==="
 
@@ -597,7 +566,6 @@ jobs:
             -print \
             -exec ls -lh {} \;
 
-
           APK_COUNT="$(
             find "$APK_DIR" \
               -maxdepth 1 \
@@ -605,7 +573,6 @@ jobs:
               -name '*.apk' |
             wc -l
           )"
-
 
           AAB_COUNT="$(
             find "$AAB_DIR" \
@@ -615,13 +582,11 @@ jobs:
             wc -l
           )"
 
-
           if [ "$APK_COUNT" -lt 1 ]; then
             echo ""
             echo "APK yaradılmadı."
             exit 1
           fi
-
 
           if [ "$AAB_COUNT" -lt 1 ]; then
             echo ""
@@ -629,11 +594,9 @@ jobs:
             exit 1
           fi
 
-
           echo ""
           echo "APK yaradıldı: $APK_COUNT"
           echo "AAB yaradıldı: $AAB_COUNT"
-
 
           echo ""
           echo "=========================================="
