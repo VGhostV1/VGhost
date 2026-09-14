@@ -11,101 +11,239 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      # ============================================================
+      # 2. JAVA 17
+      # ============================================================
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # IMPORTANT:
-      # setup-android v3 default olaraq "tools" quraşdırmağa çalışa bilər.
-      # "tools" artıq mövcud deyil. Ona görə yalnız platform-tools veririk.
+
+      # ============================================================
+      # 3. ANDROID SDK BASE
+      # ============================================================
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
 
-      - name: Install Android 37 SDK
-        shell: bash
-        run: |
-          set -e
 
-          yes | sdkmanager --licenses >/dev/null || true
-
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-37" \
-            "build-tools;37.0.0"
-
-      - name: Verify Android SDK
+      # ============================================================
+      # 4. UPDATE SDK COMMAND LINE TOOLS
+      # ============================================================
+      - name: Prepare Android SDK
         shell: bash
         run: |
           set -e
 
           echo "ANDROID_HOME=$ANDROID_HOME"
-          sdkmanager --list | grep -E \
-            'platforms;android-37|build-tools;37.0.0' || true
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          SDKMANAGER="$(command -v sdkmanager || true)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager tapılmadı."
+            exit 1
+          fi
+
+          echo "sdkmanager: $SDKMANAGER"
+
+          "$SDKMANAGER" --version
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          echo "=== Updating SDK tools ==="
+
+          "$SDKMANAGER" --update || true
+
+          echo "=== Installed packages ==="
+
+          "$SDKMANAGER" --list_installed || true
+
+
+      # ============================================================
+      # 5. FIND AND INSTALL API 37
+      # ============================================================
+      - name: Install Android API 37
+        shell: bash
+        run: |
+          set -e
+
+          SDKMANAGER="$(command -v sdkmanager)"
+
+          echo "=== Searching for Android API 37 ==="
+
+          "$SDKMANAGER" --list > /tmp/sdk-list.txt
+
+          echo "=== API 37 entries ==="
+
+          grep -E \
+            'platforms;android-37|build-tools;37' \
+            /tmp/sdk-list.txt || true
+
+          echo "=== Installing Android Platform 37 ==="
+
+          "$SDKMANAGER" --install "platforms;android-37"
+
+          echo "=== Finding Build Tools 37 ==="
+
+          BUILD_TOOLS_VERSION="$(
+            grep -E '^[[:space:]]*build-tools;37\.[0-9]+\.[0-9]+' /tmp/sdk-list.txt |
+            sed 's/^[[:space:]]*//' |
+            awk '{print $1}' |
+            sort -V |
+            tail -1
+          )"
+
+          if [ -z "$BUILD_TOOLS_VERSION" ]; then
+            echo "Build Tools 37.x tapılmadı."
+            echo "Mövcud Build Tools:"
+            grep -E 'build-tools;' /tmp/sdk-list.txt | head -30 || true
+            exit 1
+          fi
+
+          echo "Seçilən Build Tools: $BUILD_TOOLS_VERSION"
+
+          "$SDKMANAGER" --install "$BUILD_TOOLS_VERSION"
+
+
+      # ============================================================
+      # 6. VERIFY SDK 37
+      # ============================================================
+      - name: Verify Android SDK 37
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "ANDROID SDK VERIFICATION"
+          echo "=========================================="
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+          echo ""
+          echo "Platforms:"
+          ls -la "$ANDROID_HOME/platforms" || true
+
+          echo ""
+          echo "Build Tools:"
+          ls -la "$ANDROID_HOME/build-tools" || true
+
+          echo ""
+          echo "Checking API 37..."
 
           test -d "$ANDROID_HOME/platforms/android-37"
-          test -d "$ANDROID_HOME/build-tools/37.0.0"
 
-          echo "Android SDK 37 hazırdır."
+          echo ""
+          echo "API 37 OK"
 
+
+      # ============================================================
+      # 7. FIND APP ZIP
+      # ============================================================
       - name: Find and Extract App ZIP
         shell: bash
         run: |
           set -e
 
-          ZIP="$(find . -maxdepth 4 -type f -iname '*.zip' \
-            ! -path './android_project/*' \
-            -print -quit)"
+          echo "=== Searching for App ZIP ==="
+
+          ZIP="$(
+            find . \
+              -type f \
+              -iname '*.zip' \
+              ! -path './android_project/*' \
+              ! -path './.git/*' \
+              -print |
+            head -1
+          )"
 
           if [ -z "$ZIP" ]; then
-            echo "ZIP faylı tapılmadı."
+            echo "App ZIP tapılmadı."
             exit 1
           fi
 
-          echo "Tapılan ZIP: $ZIP"
+          echo "Tapılan ZIP:"
+          echo "$ZIP"
 
           rm -rf android_project
+
           mkdir -p android_project
 
           unzip -q "$ZIP" -d android_project
 
-          PROJECT_ROOT="$(find android_project -type f \
-            \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) \
-            -print -quit | xargs -r dirname)"
+          echo "=== Searching Android project ==="
+
+          PROJECT_ROOT="$(
+            find android_project \
+              -type f \
+              \( \
+                -name 'settings.gradle.kts' \
+                -o \
+                -name 'settings.gradle' \
+              \) \
+              -print |
+            head -1 |
+            xargs -r dirname
+          )"
 
           if [ -z "$PROJECT_ROOT" ]; then
-            echo "Android project ZIP-in içində tapılmadı."
+            echo "Android project tapılmadı."
+            echo "ZIP contents:"
+            find android_project -maxdepth 3 -type f | head -100
             exit 1
           fi
 
-          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-          echo "Android project: $PROJECT_ROOT"
+          echo "PROJECT_ROOT=$PROJECT_ROOT"
 
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+
+      # ============================================================
+      # 8. VERIFY PROJECT
+      # ============================================================
       - name: Verify Project Configuration
         shell: bash
         run: |
           set -e
 
-          echo "=== Root build.gradle.kts ==="
+          echo "=========================================="
+          echo "PROJECT CONFIGURATION"
+          echo "=========================================="
+
+          echo ""
+          echo "Project:"
+          echo "$PROJECT_ROOT"
+
+          echo ""
+          echo "Root Gradle:"
           cat "$PROJECT_ROOT/build.gradle.kts"
 
-          echo "=== App build.gradle.kts ==="
+          echo ""
+          echo "App Gradle:"
           cat "$PROJECT_ROOT/app/build.gradle.kts"
 
-          echo "=== settings ==="
+          echo ""
+          echo "Settings:"
+          
           if [ -f "$PROJECT_ROOT/settings.gradle.kts" ]; then
             cat "$PROJECT_ROOT/settings.gradle.kts"
           else
             cat "$PROJECT_ROOT/settings.gradle"
           fi
 
-          echo "=== SDK checks ==="
+          echo ""
+          echo "=== SDK CHECK ==="
 
           grep -q 'compileSdk = 37' \
             "$PROJECT_ROOT/app/build.gradle.kts"
@@ -113,14 +251,39 @@ jobs:
           grep -q 'targetSdk = 37' \
             "$PROJECT_ROOT/app/build.gradle.kts"
 
-          echo "API 37 configuration təsdiqləndi."
+          echo "compileSdk = 37 OK"
+          echo "targetSdk = 37 OK"
 
+
+      # ============================================================
+      # 9. GRADLE 9.3.1
+      # ============================================================
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
           cache-disabled: true
 
+
+      # ============================================================
+      # 10. CHECK GRADLE
+      # ============================================================
+      - name: Check Gradle
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "GRADLE VERSION"
+          echo "=========================================="
+
+          gradle --version
+
+
+      # ============================================================
+      # 11. DECODE KEYSTORE
+      # ============================================================
       - name: Decode signing keystore
         shell: bash
         env:
@@ -128,18 +291,23 @@ jobs:
         run: |
           set -e
 
-          test -n "$KEYSTORE_BASE64" || {
-            echo "KEYSTORE_BASE64 yoxdur."
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "KEYSTORE_BASE64 secret yoxdur."
             exit 1
-          }
+          fi
 
-          echo "$KEYSTORE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/vghost-release.jks"
+          echo "$KEYSTORE_BASE64" |
+            base64 --decode >
+            "$RUNNER_TEMP/vghost-release.jks"
 
           test -s "$RUNNER_TEMP/vghost-release.jks"
 
-          echo "Keystore hazırdır."
+          echo "Keystore OK"
 
+
+      # ============================================================
+      # 12. CONFIGURE SIGNING
+      # ============================================================
       - name: Configure Release Signing
         shell: bash
         run: |
@@ -147,41 +315,55 @@ jobs:
 
           APP_GRADLE="$PROJECT_ROOT/app/build.gradle.kts"
 
-          test -f "$APP_GRADLE" || {
+          if [ ! -f "$APP_GRADLE" ]; then
             echo "app/build.gradle.kts tapılmadı."
             exit 1
-          }
+          fi
 
           cat >> "$APP_GRADLE" <<'KOTLIN'
 
-          /* VGhost GitHub Actions signing */
+          /*
+           * VGhost GitHub Actions Release Signing
+           */
+
           android {
+
               signingConfigs {
+
                   create("vghostRelease") {
-                      storeFile = file(System.getenv("VGHOST_KEYSTORE_FILE"))
-                      storePassword = System.getenv("VGHOST_KEYSTORE_PASSWORD")
-                      keyAlias = System.getenv("VGHOST_KEY_ALIAS")
-                      keyPassword = System.getenv("VGHOST_KEY_PASSWORD")
+
+                      storeFile =
+                          file(System.getenv("VGHOST_KEYSTORE_FILE"))
+
+                      storePassword =
+                          System.getenv("VGHOST_KEYSTORE_PASSWORD")
+
+                      keyAlias =
+                          System.getenv("VGHOST_KEY_ALIAS")
+
+                      keyPassword =
+                          System.getenv("VGHOST_KEY_PASSWORD")
                   }
               }
 
               buildTypes {
+
                   getByName("release") {
-                      signingConfig = signingConfigs.getByName("vghostRelease")
+
+                      signingConfig =
+                          signingConfigs.getByName("vghostRelease")
                   }
               }
           }
 
           KOTLIN
 
-      - name: Check Gradle
-        shell: bash
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: |
-          set -e
+          echo "Release signing configuration əlavə edildi."
 
-          gradle --version
 
+      # ============================================================
+      # 13. BUILD APK + AAB
+      # ============================================================
       - name: Build Signed APK + AAB
         shell: bash
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -193,20 +375,24 @@ jobs:
         run: |
           set -e
 
-          test -n "$VGHOST_KEYSTORE_PASSWORD" || {
-            echo "KEYSTORE_PASSWORD yoxdur."
+          if [ -z "$VGHOST_KEYSTORE_PASSWORD" ]; then
+            echo "KEYSTORE_PASSWORD secret yoxdur."
             exit 1
-          }
+          fi
 
-          test -n "$VGHOST_KEY_ALIAS" || {
-            echo "KEY_ALIAS yoxdur."
+          if [ -z "$VGHOST_KEY_ALIAS" ]; then
+            echo "KEY_ALIAS secret yoxdur."
             exit 1
-          }
+          fi
 
-          test -n "$VGHOST_KEY_PASSWORD" || {
-            echo "KEY_PASSWORD yoxdur."
+          if [ -z "$VGHOST_KEY_PASSWORD" ]; then
+            echo "KEY_PASSWORD secret yoxdur."
             exit 1
-          }
+          fi
+
+          echo "=========================================="
+          echo "BUILDING RELEASE"
+          echo "=========================================="
 
           gradle \
             bundleRelease \
@@ -214,23 +400,58 @@ jobs:
             --stacktrace \
             --no-daemon
 
+
+      # ============================================================
+      # 14. VERIFY OUTPUTS
+      # ============================================================
       - name: Verify APK + AAB
         shell: bash
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           set -e
 
-          echo "=== APK ==="
+          echo "=========================================="
+          echo "BUILD OUTPUTS"
+          echo "=========================================="
+
+          echo ""
+          echo "APK files:"
           ls -lh app/build/outputs/apk/release/*.apk
 
-          echo "=== AAB ==="
+          echo ""
+          echo "AAB files:"
           ls -lh app/build/outputs/bundle/release/*.aab
 
-          test -f app/build/outputs/apk/release/*.apk
-          test -f app/build/outputs/bundle/release/*.aab
+          APK_COUNT="$(find app/build/outputs/apk/release \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' |
+            wc -l)"
 
-          echo "APK və AAB uğurla yaradıldı."
+          AAB_COUNT="$(find app/build/outputs/bundle/release \
+            -maxdepth 1 \
+            -type f \
+            -name '*.aab' |
+            wc -l)"
 
+          if [ "$APK_COUNT" -lt 1 ]; then
+            echo "APK yaradılmadı."
+            exit 1
+          fi
+
+          if [ "$AAB_COUNT" -lt 1 ]; then
+            echo "AAB yaradılmadı."
+            exit 1
+          fi
+
+          echo ""
+          echo "APK: OK"
+          echo "AAB: OK"
+
+
+      # ============================================================
+      # 15. UPLOAD AAB
+      # ============================================================
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
@@ -238,6 +459,10 @@ jobs:
           path: ${{ env.PROJECT_ROOT }}/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
+
+      # ============================================================
+      # 16. UPLOAD APK
+      # ============================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
