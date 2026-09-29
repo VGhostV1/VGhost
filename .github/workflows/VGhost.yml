@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -317,10 +320,6 @@ jobs:
         run: |
           set -e
 
-          echo "=========================================="
-          echo "PROJECT CONFIGURATION"
-          echo "=========================================="
-
           APP_GRADLE="$PROJECT_ROOT/app/build.gradle.kts"
           ROOT_GRADLE="$PROJECT_ROOT/build.gradle.kts"
 
@@ -542,7 +541,40 @@ jobs:
             --stacktrace \
             --no-daemon
 
-      # 15. VERIFY APK + AAB
+      # 15. RENAME APK TO VGhost.apk
+      - name: Rename APK to VGhost.apk
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          set -e
+
+          APK_DIR="app/build/outputs/apk/release"
+
+          APK="$(
+            find "$APK_DIR" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.apk' |
+            head -1
+          )"
+
+          if [ -z "$APK" ]; then
+            echo ""
+            echo "APK tapılmadı."
+            exit 1
+          fi
+
+          echo ""
+          echo "Original APK:"
+          echo "$APK"
+
+          mv "$APK" "$APK_DIR/VGhost.apk"
+
+          echo ""
+          echo "Final APK:"
+          ls -lh "$APK_DIR/VGhost.apk"
+
+      # 16. VERIFY APK + AAB
       - name: Verify APK + AAB
         shell: bash
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -576,13 +608,11 @@ jobs:
             -print \
             -exec ls -lh {} \;
 
-          APK_COUNT="$(
-            find "$APK_DIR" \
-              -maxdepth 1 \
-              -type f \
-              -name '*.apk' |
-            wc -l
-          )"
+          if [ ! -f "$APK_DIR/VGhost.apk" ]; then
+            echo ""
+            echo "VGhost.apk yaradılmadı."
+            exit 1
+          fi
 
           AAB_COUNT="$(
             find "$AAB_DIR" \
@@ -592,12 +622,6 @@ jobs:
             wc -l
           )"
 
-          if [ "$APK_COUNT" -lt 1 ]; then
-            echo ""
-            echo "APK yaradılmadı."
-            exit 1
-          fi
-
           if [ "$AAB_COUNT" -lt 1 ]; then
             echo ""
             echo "AAB yaradılmadı."
@@ -605,7 +629,7 @@ jobs:
           fi
 
           echo ""
-          echo "APK yaradıldı: $APK_COUNT"
+          echo "VGhost.apk yaradıldı."
           echo "AAB yaradıldı: $AAB_COUNT"
 
           echo ""
@@ -613,7 +637,7 @@ jobs:
           echo "BUILD SUCCESS"
           echo "=========================================="
 
-      # 16. UPLOAD AAB
+      # 17. UPLOAD AAB
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
@@ -621,10 +645,47 @@ jobs:
           path: ${{ env.PROJECT_ROOT }}/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
-      # 17. UPLOAD APK
+      # 18. UPLOAD APK ARTIFACT
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VGhost-Release-APK
-          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/release/*.apk
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/release/VGhost.apk
           if-no-files-found: error
+
+      # 19. CREATE GITHUB RELEASE
+      - name: Create GitHub Release
+        shell: bash
+        working-directory: ${{ env.PROJECT_ROOT }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          APK="app/build/outputs/apk/release/VGhost.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "VGhost.apk tapılmadı."
+            exit 1
+          fi
+
+          TAG="vghost-build-${{ github.run_id }}"
+
+          echo "=========================================="
+          echo "CREATING GITHUB RELEASE"
+          echo "=========================================="
+
+          echo "Tag: $TAG"
+          echo "APK: $APK"
+
+          gh release create "$TAG" "$APK" \
+            --title "VGhost Latest - Build #${{ github.run_number }}" \
+            --notes "VGhost Android APK - Build #${{ github.run_number }}" \
+            --latest
+
+          echo ""
+          echo "=========================================="
+          echo "RELEASE CREATED"
+          echo "=========================================="
+
+          echo "VGhost.apk GitHub Releases-a yükləndi."
